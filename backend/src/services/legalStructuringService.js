@@ -23,7 +23,16 @@ const OBLIGATION_PATTERN = /(?:\b(?:shall|must|is required to|agrees to|undertak
 const ALLEGATION_PATTERN = /(?:\b(?:violated|breached|failed to|in violation of|did not comply|defaulted on|misrepresented|fraudulently)\b)[^.\n]{5,260}\./gi;
 const VIOLATION_REF_PATTERN = /\b(?:section|clause|article|rule|regulation|sub-section)\s+\d+[A-Za-z]?(?:\.\d+)?(?:\([a-zA-Z0-9]+\))?/gi;
 
-const MONEY_PATTERN = /(?:₹|Rs\.?|INR|USD|\$|EUR|€|GBP|£)\s?[\d,]+(?:\.\d+)?(?:\s?(?:lakh|lakhs|crore|crores|million|billion|k))?/gi;
+// Strict: must start with a digit after the optional currency prefix. The
+// older [\d,]+ form matched bare commas, so OCR'd text like "Rs ," and
+// "Rs.," surfaced as fake monetary references on the dashboard.
+const MONEY_PATTERN = /(?:₹|Rs\.?|INR|Rupees?|USD|\$|EUR|€|GBP|£)\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:lakh|lakhs|crore|crores|million|billion|k))?/gi;
+
+// Trailing-comma cleanup: a real amount that ends in "," (e.g. "Rs. 50,000,")
+// should drop the trailing punctuation before we surface it.
+function normalizeMoneyToken(token) {
+  return token.trim().replace(/[,.\s]+$/, '');
+}
 
 // Dates: ISO (YYYY-MM-DD), DD/MM/YYYY, DD-MM-YYYY, "1st January 2024", "January 1, 2024", "Jan 2024".
 const DATE_PATTERN = new RegExp(
@@ -106,7 +115,7 @@ function structure(rawText) {
   const allegations = summarizeSentences(extractMatches(text, ALLEGATION_PATTERN, 50), 12);
   const violations = uniq(extractMatches(text, VIOLATION_REF_PATTERN, 30));
   const dates = uniq(extractMatches(text, DATE_PATTERN, 40));
-  const money = uniq(extractMatches(text, MONEY_PATTERN, 40));
+  const money = uniq(extractMatches(text, MONEY_PATTERN, 40).map(normalizeMoneyToken));
   const parties = extractParties(text);
 
   return {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Handshake } from 'lucide-react';
 import { tierColor, tierDot, bandColor } from '@/lib/mockData';
 
 function ScoreGauge({ score, band }) {
@@ -30,13 +31,25 @@ function ScoreGauge({ score, band }) {
   );
 }
 
-export default function RiskHeatmap({ risks = [], score = null }) {
+export default function RiskHeatmap({ risks = [], score = null, negotiationSuggestions = [] }) {
   const [activeTier, setActiveTier] = useState('all');
   const counts = useMemo(() => {
     const c = { red: 0, yellow: 0, green: 0 };
     for (const r of risks) c[r.tier] = (c[r.tier] || 0) + 1;
     return c;
   }, [risks]);
+
+  // Match a risk → its top negotiation suggestion by source-risk title.
+  // The backend already emits suggestions ordered by severity, so the first
+  // match for a given title is the most relevant one to show inline.
+  const suggestionByRiskTitle = useMemo(() => {
+    const map = new Map();
+    for (const s of negotiationSuggestions) {
+      if (!s.sourceRiskTitle || map.has(s.sourceRiskTitle)) continue;
+      map.set(s.sourceRiskTitle, s.suggestion);
+    }
+    return map;
+  }, [negotiationSuggestions]);
 
   const visible = activeTier === 'all' ? risks : risks.filter((r) => r.tier === activeTier);
 
@@ -98,6 +111,15 @@ export default function RiskHeatmap({ risks = [], score = null }) {
                   “{r.clause}”
                 </blockquote>
                 <p className="mt-2 text-sm">{r.explanation}</p>
+                {suggestionByRiskTitle.get(r.title) && (
+                  <div className="mt-3 inline-flex items-start gap-1.5 rounded-lg bg-white/60 px-2.5 py-1.5 text-xs ring-1 ring-current/20">
+                    <Handshake className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 opacity-70" />
+                    <span className="leading-snug">
+                      <span className="font-medium uppercase tracking-wide opacity-70">Negotiation tip ·</span>{' '}
+                      {suggestionByRiskTitle.get(r.title)}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </li>

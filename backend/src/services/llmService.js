@@ -321,37 +321,87 @@ async function analyzeDocument(documentText, documentType, structuredContext = {
   };
 }
 
+// --- Chat: prompt + context construction ----------------------------------
+//
+// The chat endpoint accepts richer context than the simple Q&A path: the
+// document excerpt, detected risks, retrieved precedents, and prior
+// conversation turns. We inject all of these into the system + user prompt
+// so the model can ground every claim in something the user can see.
+
+const CHAT_SYSTEM_PROMPT = `You are CivicLens — an educational legal intelligence assistant helping a
+non-lawyer understand their uploaded document.
+
+CORE RULES (non-negotiable):
+1. Ground every claim in either the uploaded document excerpts or the
+   retrieved precedents shown in the user message. If the context does not
+   support an answer, say "the document does not address this" plainly.
+2. Never predict legal outcomes ("you will win", "this is enforceable").
+3. Never provide legal advice. You explain; the reader decides.
+4. Use plain language. Avoid jargon unless you immediately define it.
+5. When citing a precedent, reference its caseId or title — don't invent
+   citations.
+6. When discussing a risk, quote the relevant clause excerpt rather than
+   summarizing what you think the document says.
+7. Keep answers concise — 2–4 short paragraphs unless the user asks for
+   more depth.
+8. End every response with this disclaimer on its own line:
+   "${DEFAULT_DISCLAIMER}"`;
+
+function buildChatUserPrompt({ userQuery, documentExcerpt, risks, precedents, history }) {
+  const riskBlock = (risks || []).slice(0, 8).map((r, i) =>
+    `  [${i + 1}] ${r.severity?.toUpperCase() || 'N/A'} | ${r.title}
+       excerpt: "${(r.clauseText || '').slice(0, 220)}"`,
+  ).join('\n');
+
+  const precedentBlock = (precedents || []).slice(0, 3).map((p, i) =>
+    `  [${i + 1}] caseId=${p.id || p.caseId || 'n/a'} | ${p.title}
+       court: ${p.court}, ${p.year}, similarity: ${p.similarityPercent ?? Math.round((p.similarityScore || 0) * 100)}%
+       summary: ${(p.judgmentSummary || p.summary || '').slice(0, 300)}
+       winning arguments: ${(p.keyArguments || p.winningArguments || []).slice(0, 2).join(' / ').slice(0, 400)}`,
+  ).join('\n');
+
+  const historyBlock = (history || []).slice(-6).map((m) =>
+    `${m.role === 'user' ? 'USER' : 'ASSISTANT'}: ${m.content || ''}`,
+  ).join('\n');
+
+  return `UPLOADED DOCUMENT EXCERPT:
+"""
+${(documentExcerpt || '').slice(0, 6000)}
+"""
+
+DETECTED RISKS (grounded — each carries a verbatim excerpt from the document):
+${riskBlock || '(no risks detected)'}
+
+RETRIEVED PRECEDENTS (use ONLY these when citing prior cases):
+${precedentBlock || '(no precedents retrieved)'}
+
+${historyBlock ? `PRIOR CONVERSATION:\n${historyBlock}\n\n` : ''}USER QUESTION: ${userQuery}`;
+}
+
 /**
- * Free-form Q&A grounded in document context. Used by the /api/chat route.
- * Same guardrails apply: no advice, no outcome prediction, educational tone.
+ * Free-form Q&A grounded in document context. Used by the /api/chat route
+ * when a non-streaming response is acceptable.
  */
-async function answerQuestion(documentContext, question) {
+async function answerQuestion(documentContext, question, opts = {}) {
   if (!question || typeof question !== 'string') {
     return { answer: 'Please provide a question.', meta: { ok: false } };
   }
 
-  const system = `You are CivicLens — an educational legal AI assistant. Answer the user's
-question about their uploaded document grounded ONLY in the document context
-provided. Do not predict legal outcomes. Do not provide legal advice. Keep
-answers concise, plain-language, and educational. If the document context
-does not contain enough information to answer, say so plainly.
+  // Accept either the legacy string-only signature OR the new structured one.
+  const ctx = typeof documentContext === 'string'
+    ? { documentExcerpt: documentContext }
+    : (documentContext || {});
 
-Always end answers with the disclaimer:
-"${DEFAULT_DISCLAIMER}"`;
-
-  const ctxText = typeof documentContext === 'string'
-    ? documentContext.slice(0, 8000)
-    : JSON.stringify(documentContext || {}, null, 2).slice(0, 8000);
-
-  const user = `DOCUMENT CONTEXT:
-"""
-${ctxText}
-"""
-
-QUESTION: ${question}`;
+  const user = buildChatUserPrompt({
+    userQuery: question,
+    documentExcerpt: ctx.documentExcerpt || ctx.rawText || '',
+    risks: ctx.risks || [],
+    precedents: ctx.precedents || ctx.similarJudgments || [],
+    history: opts.history || [],
+  });
 
   try {
-    const { text } = await callClaude({ system, user, maxTokens: 1024 });
+    const { text } = await callClaude({ system: CHAT_SYSTEM_PROMPT, user, maxTokens: 1024 });
     return { answer: text.trim() || 'No response generated.', meta: { ok: true } };
   } catch (err) {
     return {
@@ -364,9 +414,113 @@ QUESTION: ${question}`;
   }
 }
 
+/**
+ * Stream a grounded chat answer as plain-text chunks.
+ *
+ * Why streaming: a non-streaming Claude call for a chat turn takes 5–30s.
+ * On a demo, that feels broken — users assume the page hung. Streaming
+ * surfaces the first token in ~500ms and the rest progressively. Anthropic's
+ * Messages API supports SSE natively; we parse those server-side and re-emit
+ * a simpler text-chunk stream to the frontend so the client doesn't need
+ * Anthropic-specific event parsing.
+ *
+ * @param {object} params
+ * @param {string} params.question
+ * @param {object} params.documentContext  { documentExcerpt|rawText, risks, precedents }
+ * @param {Array}  [params.history]
+ * @param {(chunk: string) => void} params.onChunk    Called with each text delta.
+ * @param {() => void} [params.onDone]
+ * @param {(err: Error) => void} [params.onError]
+ */
+async function streamAnswer({ question, documentContext, history, onChunk, onDone, onError }) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    onError?.(Object.assign(new Error('ANTHROPIC_API_KEY is not set in environment'), { code: 'LLM_NO_API_KEY' }));
+    return;
+  }
+
+  const ctx = documentContext || {};
+  const user = buildChatUserPrompt({
+    userQuery: question,
+    documentExcerpt: ctx.documentExcerpt || ctx.rawText || '',
+    risks: ctx.risks || [],
+    precedents: ctx.precedents || ctx.similarJudgments || [],
+    history: history || [],
+  });
+
+  let resp;
+  try {
+    resp = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': ANTHROPIC_VERSION,
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 1024,
+        stream: true,
+        system: CHAT_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: user }],
+      }),
+    });
+  } catch (err) {
+    onError?.(err);
+    return;
+  }
+
+  if (!resp.ok || !resp.body) {
+    const text = await resp.text().catch(() => '');
+    onError?.(Object.assign(new Error(`Claude API ${resp.status}: ${text.slice(0, 300)}`), {
+      code: 'LLM_HTTP_ERROR',
+      status: resp.status,
+    }));
+    return;
+  }
+
+  // Parse Anthropic's SSE stream. Events look like:
+  //   event: content_block_delta
+  //   data: { "type":"content_block_delta", "delta":{"type":"text_delta","text":"..."} }
+  // We only need the `text_delta` payloads from `content_block_delta` events.
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE messages are separated by double-newline
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const chunk = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const dataLine = chunk.split('\n').find((l) => l.startsWith('data:'));
+        if (!dataLine) continue;
+        const json = dataLine.slice(5).trim();
+        if (!json || json === '[DONE]') continue;
+        try {
+          const evt = JSON.parse(json);
+          if (evt.type === 'content_block_delta' && evt.delta?.type === 'text_delta') {
+            onChunk?.(evt.delta.text || '');
+          }
+        } catch (_) {
+          // Ignore malformed SSE frames — Anthropic occasionally emits
+          // heartbeat/ping events with non-JSON `data:` payloads.
+        }
+      }
+    }
+    onDone?.();
+  } catch (err) {
+    onError?.(err);
+  }
+}
+
 module.exports = {
   analyzeDocument,
   answerQuestion,
+  streamAnswer,
   // exported for tests / inspection
   resolveMode,
   MODE_PROMPTS,

@@ -11,6 +11,9 @@ const legalStructuringService = require('../services/legalStructuringService');
 const embeddingPreparationService = require('../services/embeddingPreparationService');
 const llmService = require('../services/llmService');
 const ragService = require('../services/ragService');
+const riskEngine = require('../services/riskEngine');
+const judgmentRetrievalService = require('../services/judgmentRetrievalService');
+const actionableInsightsService = require('../services/actionableInsightsService');
 
 const router = express.Router();
 
@@ -59,6 +62,14 @@ function handleUpload(req, res, next) {
 // Build the legal-intelligence layer (rag + llm) on top of an ingestion result.
 // Pulled into a helper so /upload?analyze=1 and /api/analyze (no-file form)
 // share the same orchestration logic.
+// Run the deterministic risk engine + judgment retrieval. These run even when
+// the LLM is unavailable (or disabled) — every clause we surface here is
+// traceable to a verbatim excerpt from the uploaded document.
+function runGroundedAnalysis({ rawText, structuredContext }) {
+  const { risks, score } = riskEngine.analyzeRisks(rawText, structuredContext);
+  return { risks, score };
+}
+
 async function runLegalIntelligence({ rawText, structuredContext }) {
   // Query for RAG combines the deterministic signals (allegations, violations,
   // dispute category) with a snippet of raw text. Pure rawText queries get
@@ -129,6 +140,26 @@ router.post('/upload', handleUpload, async (req, res) => {
     const structuredContext = legalStructuringService.structure(rawText);
     const preparedChunks = embeddingPreparationService.prepare(rawText);
 
+    // Grounded analysis always runs — these outputs come from the document
+    // text itself, not from any external API. Every risk carries a verbatim
+    // clause excerpt; if a clause isn't in the text, no risk is produced.
+    const grounded = rawText.trim() ? runGroundedAnalysis({ rawText, structuredContext }) : { risks: [], score: { predatoryScore: 0, band: 'low', drivers: [] } };
+
+    // Similar judgments (top 3) — also deterministic, no external calls.
+    let similarJudgments = [];
+    if (rawText.trim()) {
+      try {
+        similarJudgments = await judgmentRetrievalService.retrieveSimilarJudgments(rawText, structuredContext.docType);
+      } catch (err) {
+        console.error('[analyze/upload] judgment retrieval soft-fail:', err);
+      }
+    }
+
+    // Actionable consumer guidance — derived deterministically from grounded
+    // risks. Same input → same output; no LLM call, no hallucination surface.
+    const insights = actionableInsightsService.generateInsights(grounded.risks, structuredContext.docType);
+    const chatChips = actionableInsightsService.generateChatChips(grounded.risks, similarJudgments);
+
     // Run LLM + RAG by default. Caller can opt out with ?analyze=0 (useful
     // for diagnostics that only want extraction). Empty extractions skip the
     // LLM entirely — see schemaValidator.emptyAnalysisEnvelope for why.
@@ -149,7 +180,16 @@ router.post('/upload', handleUpload, async (req, res) => {
       docType: structuredContext.docType,
       structuredContext,
       preparedChunks,
-      // Legal-intelligence layer (Part 4). Always shape-correct or null.
+      // Grounded layer (Part 6) — always present, every entry traceable to text.
+      grounded: {
+        risks: grounded.risks,
+        score: grounded.score,
+        similarJudgments,
+        suggestedQuestions: insights.suggestedQuestions,
+        negotiationSuggestions: insights.negotiationSuggestions,
+        chatChips,
+      },
+      // LLM-augmented layer (Part 4). May be null if LLM was disabled/failed.
       analysis: intel?.analysis || null,
       rag: intel?.rag || null,
       llmMeta: intel?.llmMeta || null,
