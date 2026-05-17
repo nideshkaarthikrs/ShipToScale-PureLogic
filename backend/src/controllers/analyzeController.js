@@ -9,6 +9,8 @@ const fs = require('fs/promises');
 const ocrService = require('../services/ocrService');
 const legalStructuringService = require('../services/legalStructuringService');
 const embeddingPreparationService = require('../services/embeddingPreparationService');
+const llmService = require('../services/llmService');
+const ragService = require('../services/ragService');
 
 const router = express.Router();
 
@@ -54,12 +56,62 @@ function handleUpload(req, res, next) {
   });
 }
 
-router.post('/', (_req, res) => {
-  res.status(501).json({
-    error: 'analyze not implemented',
-    stage: 'extraction',
-    hint: 'Use POST /api/analyze/upload for the active ingestion pipeline.',
+// Build the legal-intelligence layer (rag + llm) on top of an ingestion result.
+// Pulled into a helper so /upload?analyze=1 and /api/analyze (no-file form)
+// share the same orchestration logic.
+async function runLegalIntelligence({ rawText, structuredContext }) {
+  // Query for RAG combines the deterministic signals (allegations, violations,
+  // dispute category) with a snippet of raw text. Pure rawText queries get
+  // overwhelmed by boilerplate; pure structuredContext queries miss vocab.
+  const queryPieces = [
+    structuredContext?.disputeCategory,
+    (structuredContext?.keyAllegations || []).join(' '),
+    (structuredContext?.potentialViolations || []).join(' '),
+    (structuredContext?.obligations || []).slice(0, 3).join(' '),
+    (rawText || '').slice(0, 2000),
+  ].filter(Boolean);
+
+  const ragResult = await ragService.retrieveContext(queryPieces.join('\n'), {
+    topK: 5,
+    disputeDomain: structuredContext?.disputeCategory,
   });
+  const winningArgumentRefs = ragService.extractWinningArguments(ragResult.matches);
+
+  const { analysis, mode, meta } = await llmService.analyzeDocument(
+    rawText,
+    structuredContext?.docType,
+    structuredContext,
+    { retrievedJudgments: ragResult.matches, winningArgumentRefs },
+  );
+
+  return {
+    analysis,
+    rag: {
+      mode,
+      totalIndexed: ragResult.totalIndexed,
+      byDomain: ragResult.byDomain,
+      matchCount: ragResult.matches.length,
+    },
+    llmMeta: meta,
+  };
+}
+
+// POST /api/analyze — JSON body { rawText, structuredContext } path. Used when
+// the client has already uploaded and just wants the LLM layer (e.g., re-run
+// after editing structuredContext). Fast-path; no file I/O.
+router.post('/', express.json({ limit: '2mb' }), async (req, res) => {
+  const { rawText, structuredContext } = req.body || {};
+  if (typeof rawText !== 'string' || !rawText.trim()) {
+    return res.status(400).json({ error: 'missing_rawText', message: 'Provide rawText in the JSON body.' });
+  }
+  try {
+    const startedAt = Date.now();
+    const intel = await runLegalIntelligence({ rawText, structuredContext: structuredContext || {} });
+    return res.json({ ...intel, processingTimeMs: Date.now() - startedAt });
+  } catch (err) {
+    console.error('[analyze] legal-intelligence error:', err);
+    return res.status(500).json({ error: 'analysis_failure', message: err.message });
+  }
 });
 
 router.post('/upload', handleUpload, async (req, res) => {
@@ -77,11 +129,30 @@ router.post('/upload', handleUpload, async (req, res) => {
     const structuredContext = legalStructuringService.structure(rawText);
     const preparedChunks = embeddingPreparationService.prepare(rawText);
 
+    // Run LLM + RAG by default. Caller can opt out with ?analyze=0 (useful
+    // for diagnostics that only want extraction). Empty extractions skip the
+    // LLM entirely — see schemaValidator.emptyAnalysisEnvelope for why.
+    const wantsAnalysis = req.query.analyze !== '0' && req.body?.analyze !== '0';
+    let intel = null;
+    if (wantsAnalysis && rawText.trim()) {
+      try {
+        intel = await runLegalIntelligence({ rawText, structuredContext });
+      } catch (err) {
+        // Soft-fail: ingestion succeeded; surface analysis error in meta.
+        console.error('[analyze/upload] legal-intelligence soft-fail:', err);
+        intel = { analysis: null, rag: null, llmMeta: { ok: false, reason: 'LLM_PIPELINE', message: err.message } };
+      }
+    }
+
     const payload = {
       rawText,
       docType: structuredContext.docType,
       structuredContext,
       preparedChunks,
+      // Legal-intelligence layer (Part 4). Always shape-correct or null.
+      analysis: intel?.analysis || null,
+      rag: intel?.rag || null,
+      llmMeta: intel?.llmMeta || null,
       processingTimeMs: Date.now() - startedAt,
       meta: {
         originalName: file.originalname,
