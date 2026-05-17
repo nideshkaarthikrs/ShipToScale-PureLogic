@@ -117,8 +117,15 @@ router.post('/', async (req, res) => {
   };
   res.write(`event: grounding\ndata: ${JSON.stringify(groundingMeta)}\n\n`);
 
+  // Client-disconnect detection. On Node 16+ `req.on('close')` fires as soon
+  // as the request body has been fully read — *not* when the client gives up —
+  // so we'd flip `aborted` true on the first turn and drop every chunk.
+  // The reliable signal for an abandoned response is `res.on('close')` fired
+  // while the response is still writable (i.e. before we called res.end()).
   let aborted = false;
-  req.on('close', () => { aborted = true; });
+  res.on('close', () => {
+    if (!res.writableEnded) aborted = true;
+  });
 
   await llmService.streamAnswer({
     question: userQuery,
