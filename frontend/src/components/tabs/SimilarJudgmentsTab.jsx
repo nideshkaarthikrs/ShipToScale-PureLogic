@@ -16,7 +16,7 @@ export default function SimilarJudgmentsTab({ precedents = [] }) {
     <section>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Similar Judgments</h2>
+          <h2 className="text-xl font-black tracking-tight text-slate-950">Similar Judgments</h2>
           <p className="text-sm text-slate-500">
             Indian court precedents semantically matched to clauses in this document.
           </p>
@@ -26,7 +26,7 @@ export default function SimilarJudgmentsTab({ precedents = [] }) {
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs"
+            className="rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs font-semibold shadow-sm"
           >
             <option value="similarity">Similarity</option>
             <option value="year">Year</option>

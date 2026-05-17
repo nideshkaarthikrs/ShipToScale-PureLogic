@@ -4,19 +4,19 @@ import { Calendar, Users, IndianRupee, FileText, ShieldAlert, FileSignature } fr
 
 function Stat({ icon: Icon, label, value }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="surface-card surface-card-hover p-5">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
         <Icon className="h-3.5 w-3.5" />
         {label}
       </div>
-      <div className="mt-2 text-2xl font-bold text-slate-900">{value}</div>
+      <div className="mt-2 text-2xl font-black tracking-tight text-slate-950">{value}</div>
     </div>
   );
 }
 
 function ListCard({ icon: Icon, title, items, empty }) {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <section className="surface-card p-5">
       <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
         <Icon className="h-4 w-4 text-slate-500" />
         {title}
@@ -26,7 +26,7 @@ function ListCard({ icon: Icon, title, items, empty }) {
           {items.map((item, i) => (
             <li
               key={`${item}-${i}`}
-              className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700"
+              className="rounded-full bg-slate-100/90 px-2.5 py-1 text-xs font-semibold text-slate-700 ring-1 ring-slate-200/70"
             >
               {item}
             </li>
@@ -61,12 +61,12 @@ export default function SummaryTab({ analysis }) {
         <ListCard icon={ShieldAlert} title="Potential violations" items={ctx.potentialViolations} empty="No statutory references found." />
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="surface-card overflow-hidden p-5">
         <h3 className="text-sm font-semibold text-slate-700">Extracted text preview</h3>
         <p className="mt-1 text-xs text-slate-500">
           {charCount.toLocaleString()} characters · engine: {meta.engine || '—'} · processed in {analysis?.processingTimeMs || 0} ms
         </p>
-        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-50 p-3 font-mono text-xs leading-relaxed text-slate-700">
+        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-xl border border-slate-200/80 bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-100 shadow-inner">
 {analysis?.rawText?.slice(0, 4000) || '— no extractable text —'}
         </pre>
         {meta.warning && (

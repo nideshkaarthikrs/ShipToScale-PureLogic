@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, FileText, AlertCircle, Loader2 } from 'lucide-react';
+import { Upload, FileText, AlertCircle, Loader2, ScanLine } from 'lucide-react';
 import { uploadDocument, ANALYSIS_STORAGE_KEY } from '@/lib/api';
 
 const ACCEPTED = '.pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg';
@@ -48,28 +48,39 @@ export default function UploadZone() {
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
         className={[
-          'flex h-64 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed bg-white px-6 text-center transition',
-          dragOver ? 'border-slate-900 bg-slate-50' : 'border-slate-300 hover:border-slate-400',
+          'relative flex min-h-80 w-full flex-col items-center justify-center overflow-hidden rounded-3xl border border-dashed px-6 text-center transition duration-200',
+          dragOver ? 'border-teal-500 bg-teal-50/70 shadow-[0_20px_60px_rgba(20,184,166,0.16)]' : 'border-slate-300/90 bg-white/82 hover:border-slate-500 hover:bg-white',
           busy ? 'pointer-events-none opacity-90' : '',
         ].join(' ')}
       >
+        <div className="pointer-events-none absolute inset-x-8 top-6 h-px bg-gradient-to-r from-transparent via-slate-300 to-transparent" />
+        <div className="pointer-events-none absolute -bottom-16 left-1/2 h-40 w-40 -translate-x-1/2 rounded-full bg-teal-400/10 blur-3xl" />
         {busy ? (
           <>
-            <Loader2 className="h-8 w-8 animate-spin text-slate-600" />
-            <p className="mt-3 text-sm font-medium text-slate-700">Analyzing document…</p>
-            <div className="mt-4 h-1.5 w-56 overflow-hidden rounded-full bg-slate-200">
-              <div className="h-full bg-slate-900 transition-all" style={{ width: `${Math.max(8, progress * 100)}%` }} />
+            <div className="icon-tile h-14 w-14 text-teal-700">
+              <Loader2 className="h-7 w-7 animate-spin" />
+            </div>
+            <p className="mt-4 text-sm font-bold text-slate-900">Analyzing document</p>
+            <p className="mt-1 text-xs text-slate-500">OCR, clause mapping, precedent retrieval</p>
+            <div className="mt-5 h-2 w-64 overflow-hidden rounded-full bg-slate-200">
+              <div className="h-full rounded-full bg-gradient-to-r from-slate-950 via-teal-600 to-amber-500 transition-all" style={{ width: `${Math.max(8, progress * 100)}%` }} />
             </div>
           </>
         ) : (
           <>
-            <Upload className="h-8 w-8 text-slate-500" />
-            <p className="mt-3 text-base font-medium text-slate-700">Drag and drop a document here</p>
-            <p className="mt-1 text-sm text-slate-500">PDF, JPG, or PNG — up to 20 MB</p>
+            <div className="icon-tile h-16 w-16 text-slate-950">
+              {dragOver ? <ScanLine className="h-8 w-8 text-teal-600" /> : <Upload className="h-8 w-8" />}
+            </div>
+            <p className="mt-5 text-lg font-black tracking-tight text-slate-950">
+              {dragOver ? 'Drop it here to start analysis' : 'Drag a document into CivicLens'}
+            </p>
+            <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
+              PDF, JPG, or PNG up to 20 MB. We will extract text, identify risk clauses, and build your dashboard.
+            </p>
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+              className="cool-button mt-6"
             >
               <FileText className="h-4 w-4" />
               Choose file

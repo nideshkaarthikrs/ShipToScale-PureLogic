@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, FileWarning, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, FileSearch, FileWarning, Gauge, Scale, ShieldCheck } from 'lucide-react';
 
 import TabNavigation from '@/components/TabNavigation';
 import SummaryTab from '@/components/tabs/SummaryTab';
@@ -137,21 +137,23 @@ export default function DashboardPage() {
   ];
 
   if (!hydrated) {
-    return <main className="mx-auto max-w-7xl px-6 py-10 text-slate-500">Loading…</main>;
+    return <main className="mx-auto max-w-7xl px-6 py-10 text-slate-500">Loading...</main>;
   }
 
   if (!analysis) {
     return (
-      <main className="mx-auto flex max-w-2xl flex-col items-center px-6 py-20 text-center">
-        <FileWarning className="h-10 w-10 text-amber-500" />
+      <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center px-6 py-20 text-center">
+        <div className="icon-tile h-14 w-14 text-amber-600">
+          <FileWarning className="h-7 w-7" />
+        </div>
         <h1 className="mt-4 text-2xl font-semibold text-slate-900">No analysis loaded</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Upload a document from the home page first — the dashboard reads the most recent analysis from session storage.
+          Upload a document from the home page first. The dashboard reads the most recent analysis from session storage.
         </p>
         <button
           type="button"
           onClick={() => router.push('/')}
-          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
+          className="cool-button mt-6"
         >
           <ArrowLeft className="h-4 w-4" />
           Go to upload
@@ -163,32 +165,59 @@ export default function DashboardPage() {
   const llmOk = analysis.llmMeta?.ok;
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-10">
-      <Link href="/" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-900">
-        <ArrowLeft className="h-4 w-4" />
-        Back to upload
-      </Link>
+    <main className="mx-auto max-w-7xl px-5 py-6 sm:px-6 sm:py-8">
+      <div className="mb-5 flex items-center justify-between gap-4">
+        <Link href="/" className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1.5 text-sm font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200/80 backdrop-blur hover:text-slate-950">
+          <ArrowLeft className="h-4 w-4" />
+          Upload
+        </Link>
+        <div className="hidden items-center gap-2 rounded-full bg-slate-950 px-3 py-1.5 text-xs font-semibold text-white shadow-lg sm:flex">
+          <FileSearch className="h-3.5 w-3.5 text-teal-300" />
+          CivicLens Analysis
+        </div>
+      </div>
 
-      <header className="mt-4 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">{analysis.meta?.originalName || 'Document'}</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            <span className="capitalize">{analysis.structuredContext?.docType || 'unknown'}</span>
-            <span className="mx-1.5 text-slate-300">·</span>
-            {analysis.meta?.pageCount || '?'} pages
-            <span className="mx-1.5 text-slate-300">·</span>
-            extracted via <code className="font-mono text-xs">{analysis.meta?.engine}</code>
-            <span className="mx-1.5 text-slate-300">·</span>
-            {analysis.processingTimeMs} ms
-          </p>
+      <header className="glass-panel overflow-hidden rounded-[1.75rem]">
+        <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_22rem] lg:items-end">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/70 px-3 py-1 text-xs font-semibold text-slate-600 ring-1 ring-slate-200/70">
+              <ShieldCheck className="h-3.5 w-3.5 text-teal-600" />
+              Evidence-first review
+            </div>
+            <h1 className="mt-4 max-w-4xl text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
+              {analysis.meta?.originalName || 'Document'}
+            </h1>
+            <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600">
+              <span className="capitalize">{analysis.structuredContext?.docType || 'unknown'}</span>
+              <span className="text-slate-300">/</span>
+              <span>{analysis.meta?.pageCount || '?'} pages</span>
+              <span className="text-slate-300">/</span>
+              <span>engine <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-xs text-slate-700">{analysis.meta?.engine}</code></span>
+              <span className="text-slate-300">/</span>
+              <span>{analysis.processingTimeMs} ms</span>
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl bg-slate-950 p-4 text-white shadow-xl">
+              <Gauge className="h-5 w-5 text-teal-300" />
+              <p className="mt-3 text-3xl font-black">{score?.predatoryScore ?? '--'}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Risk score</p>
+            </div>
+            <div className="rounded-2xl bg-white/80 p-4 shadow-sm ring-1 ring-slate-200/80">
+              <Scale className="h-5 w-5 text-amber-600" />
+              <p className="mt-3 text-3xl font-black text-slate-950">{precedents.length}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Judgments</p>
+            </div>
+          </div>
         </div>
       </header>
 
-      <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900 flex items-center gap-2">
-        <ShieldCheck className="h-4 w-4" />
-        Every risk below is traceable to a verbatim clause from your uploaded document. No fabricated penalties or invented terms.
+      <div className="mt-4 flex items-center gap-2 rounded-2xl border border-emerald-200/80 bg-emerald-50/85 px-4 py-3 text-xs text-emerald-950 shadow-sm backdrop-blur">
+        <ShieldCheck className="h-4 w-4 flex-shrink-0" />
+        <span>Every risk below is traceable to a verbatim clause from your uploaded document. No fabricated penalties or invented terms.</span>
         {llmOk === false && (
-          <span className="ml-auto rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium">
+          <span className="ml-auto whitespace-nowrap rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold">
             grounded mode (LLM unavailable)
           </span>
         )}

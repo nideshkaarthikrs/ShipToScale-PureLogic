@@ -44,13 +44,13 @@ export default function BeforeYouSignTab({ analysis }) {
 
   return (
     <section className="space-y-6">
-      <header className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <header className="surface-card p-6">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+          <div className="icon-tile h-10 w-10 text-amber-700">
             <ShieldCheck className="h-5 w-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-slate-900">Before you sign</h2>
+            <h2 className="text-xl font-black tracking-tight text-slate-950">Before you sign</h2>
             <p className="mt-1 text-sm text-slate-500">
               Practical questions to ask and changes to request — each item is tied to a
               specific risk we detected in your document. No invented conditions, no
@@ -73,9 +73,9 @@ export default function BeforeYouSignTab({ analysis }) {
       )}
 
       {questions.length > 0 && (
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="surface-card overflow-hidden">
           <header className="flex items-center gap-3 border-b border-slate-200 px-6 py-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-50 text-indigo-700">
+            <div className="icon-tile h-9 w-9 text-indigo-700">
               <HelpCircle className="h-5 w-5" />
             </div>
             <div>
@@ -102,9 +102,9 @@ export default function BeforeYouSignTab({ analysis }) {
       )}
 
       {negotiations.length > 0 && (
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <section className="surface-card overflow-hidden">
           <header className="flex items-center gap-3 border-b border-slate-200 px-6 py-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-700">
+            <div className="icon-tile h-9 w-9 text-emerald-700">
               <Handshake className="h-5 w-5" />
             </div>
             <div>
